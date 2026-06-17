@@ -1,0 +1,30 @@
+.cursor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.python-version
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Node (frontend, later)
+node_modules/
+.next/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

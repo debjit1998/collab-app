@@ -1,0 +1,77 @@
+# Deploys apps/api to AWS.
+#
+# Prerequisites (none of this exists yet — set up in order before enabling):
+#   1. Personal AWS account.
+#   2. ECR repository (e.g. "collab-api") in your chosen region.
+#   3. GitHub OIDC identity provider registered in IAM.
+#   4. IAM role (e.g. "github-collab-deploy") trusted by that OIDC provider,
+#      scoped to repo:<your-user>/collab-app:ref:refs/heads/main.
+#      Permissions: ecr:* on the repo, ssm:SendCommand on the EC2 instance.
+#   5. EC2 instance running Docker + SSM agent, in a public subnet,
+#      with an instance profile allowing ECR pull and SSM parameter read.
+#
+# Then set the following in GitHub:
+#   Secrets:  (none — OIDC means no long-lived keys)
+#   Variables:
+#     AWS_REGION              e.g. us-east-1
+#     AWS_ACCOUNT_ID          12-digit account id
+#     AWS_DEPLOY_ROLE_ARN     arn:aws:iam::<acct>:role/github-collab-deploy
+#     ECR_REPOSITORY          collab-api
+#     EC2_INSTANCE_ID         i-0abc...
+#
+# Until those exist, this workflow is intentionally gated to manual dispatch.
+
+name: api-deploy
+
+on:
+  workflow_dispatch:
+  # Uncomment once AWS is set up:
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "apps/api/**"
+  #     - ".github/workflows/api-deploy.yml"
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger deploy on EC2 via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy collab-api ${{ github.sha }}" \
+            --parameters commands='[
+              "aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com",
+              "docker pull ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY }}:latest",
+              "systemctl restart collab-api"
+            ]' \
+            --output text
