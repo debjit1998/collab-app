@@ -25,12 +25,11 @@ name: api-deploy
 
 on:
   workflow_dispatch:
-  # Uncomment once AWS is set up:
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "apps/api/**"
-  #     - ".github/workflows/api-deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/api-deploy.yml"
 
 permissions:
   id-token: write   # required for OIDC
