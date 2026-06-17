@@ -42,26 +42,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug — call STS directly with the OIDC token
-        continue-on-error: true
-        run: |
-          TOKEN=$(curl -sLS "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
-            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" | jq -r .value)
-
-          echo "=== Calling STS AssumeRoleWithWebIdentity directly ==="
-          aws sts assume-role-with-web-identity \
-            --role-arn "${{ vars.AWS_DEPLOY_ROLE_ARN }}" \
-            --role-session-name gh-debug \
-            --web-identity-token "$TOKEN" \
-            --region ${{ vars.AWS_REGION }} \
-            --duration-seconds 900 || echo "(see error above for the real STS message)"
-
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          audience: sts.amazonaws.com
 
       - name: Login to Amazon ECR
         id: ecr
