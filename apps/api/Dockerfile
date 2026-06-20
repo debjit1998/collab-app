@@ -11,6 +11,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
 
 RUN useradd --create-home --uid 1000 app && chown -R app:app /app
 USER app

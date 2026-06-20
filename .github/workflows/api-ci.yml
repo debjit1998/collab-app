@@ -18,6 +18,22 @@ defaults:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: collab
+          POSTGRES_PASSWORD: collab
+          POSTGRES_DB: collab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U collab -d collab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://collab:collab@localhost:5432/collab
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +51,9 @@ jobs:
 
       - name: Ruff format check
         run: ruff format --check .
+
+      - name: Run migrations (verify alembic scripts are valid)
+        run: alembic upgrade head
 
       - name: Pytest
         run: pytest -q

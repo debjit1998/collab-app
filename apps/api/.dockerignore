@@ -10,9 +10,11 @@ venv
 .env.*
 tests
 README.md
-requirements-dev.txt
 pyproject.toml
 .git
 .gitignore
 .dockerignore
 Dockerfile
+Dockerfile.dev
+docker-compose.yml
+docker-compose.dev.yml

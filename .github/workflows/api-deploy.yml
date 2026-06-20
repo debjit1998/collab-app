@@ -73,11 +73,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Base64-encode the compose file so we can ship it inside the SSM
-          # command without worrying about YAML/JSON/shell quoting.
+          # Ship the compose file base64-encoded so we don't fight quoting
+          # through YAML → JSON → shell layers.
           COMPOSE_B64=$(base64 -w0 apps/api/docker-compose.yml)
 
-          # SSM command parameters — kept in a file so we don't fight the shell.
           jq -n \
             --arg b64 "$COMPOSE_B64" \
             --arg region "$AWS_REGION" \
@@ -86,17 +85,57 @@ jobs:
               commands: [
                 "set -euo pipefail",
                 "mkdir -p /opt/collab",
-                ("echo " + $b64 + " | base64 -d > /opt/collab/docker-compose.yml"),
                 "cd /opt/collab",
+                ("echo " + $b64 + " | base64 -d > /opt/collab/docker-compose.yml"),
+                # Fetch DATABASE_URL from SSM (EC2 instance role has /collab/* read perms).
+                ("DATABASE_URL=$(aws ssm get-parameter --name /collab/prod/database_url --with-decryption --query Parameter.Value --output text --region " + $region + ")"),
+                "umask 077",
+                "printf '\''DATABASE_URL=%s\\n'\'' \"$DATABASE_URL\" > /opt/collab/.env",
                 ("aws ecr get-login-password --region " + $region + " | docker login --username AWS --password-stdin " + $account + ".dkr.ecr." + $region + ".amazonaws.com"),
                 "docker compose pull",
+                # One-shot migration container. --no-deps avoids spinning redis just for alembic.
+                "docker compose run --rm --no-deps api alembic upgrade head",
                 "docker compose up -d"
               ]
             }' > /tmp/ssm-params.json
 
-          aws ssm send-command \
+          CMD_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy collab-api $GITHUB_SHA" \
             --parameters file:///tmp/ssm-params.json \
-            --output text
+            --cloud-watch-output-config CloudWatchOutputEnabled=false \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM CommandId: $CMD_ID"
+
+          # Wait for the EC2 to actually finish running the command, then fail
+          # the workflow if status != Success. aws ssm wait returns non-zero on
+          # terminal failure, so we trap it and still fetch the invocation
+          # output for the logs.
+          set +e
+          aws ssm wait command-executed \
+            --command-id "$CMD_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --region "$AWS_REGION"
+          WAIT_RC=$?
+          set -e
+
+          INV_JSON=$(aws ssm get-command-invocation \
+            --command-id "$CMD_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --output json)
+
+          STATUS=$(jq -r '.Status' <<<"$INV_JSON")
+          echo "=== SSM Status: $STATUS ==="
+          echo "--- stdout ---"
+          jq -r '.StandardOutputContent' <<<"$INV_JSON"
+          echo "--- stderr ---"
+          jq -r '.StandardErrorContent' <<<"$INV_JSON"
+
+          if [ "$STATUS" != "Success" ] || [ "$WAIT_RC" -ne 0 ]; then
+            echo "::error::Deploy failed on EC2 (status=$STATUS, wait_rc=$WAIT_RC)"
+            exit 1
+          fi

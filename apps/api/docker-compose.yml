@@ -1,10 +1,12 @@
-# Lives at /opt/collab/docker-compose.yml on the EC2.
-# This file in the repo is the source of truth — copy it onto the box
-# manually when it changes (or have user-data drop a fresh copy on boot).
+# Lives at /opt/collab/docker-compose.yml on the EC2 (written by the deploy workflow
+# on every push). This file in the repo is the source of truth.
 #
-# Deploy flow (run from /opt/collab):
-#   docker compose pull        # pulls the latest api image from ECR
-#   docker compose up -d       # recreates containers whose image changed
+# Deploy flow (executed via SSM from GitHub Actions):
+#   1. Write this file → /opt/collab/docker-compose.yml
+#   2. Fetch DATABASE_URL from SSM → /opt/collab/.env
+#   3. docker compose pull            (refresh the api image from ECR)
+#   4. docker compose run --rm --no-deps api alembic upgrade head    (migrations)
+#   5. docker compose up -d           (recreates api; redis stays running)
 
 services:
   redis:
@@ -25,6 +27,8 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       REDIS_URL: redis://redis:6379/0
     depends_on:
