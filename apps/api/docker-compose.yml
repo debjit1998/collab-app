@@ -1,0 +1,40 @@
+# Lives at /opt/collab/docker-compose.yml on the EC2.
+# This file in the repo is the source of truth — copy it onto the box
+# manually when it changes (or have user-data drop a fresh copy on boot).
+#
+# Deploy flow (run from /opt/collab):
+#   docker compose pull        # pulls the latest api image from ECR
+#   docker compose up -d       # recreates containers whose image changed
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - collab-net
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  api:
+    image: 182399698691.dkr.ecr.ap-south-1.amazonaws.com/collab-api:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - collab-net
+
+networks:
+  collab-net:
+
+volumes:
+  redis-data:
